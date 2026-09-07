@@ -20,11 +20,30 @@ personal tasks.
 
 ## Running the server
 
+The endpoint requires a bearer token, and each user gets their own key. Keys are
+looked up in the hardcoded map in
+[`Authentication/ApiKeyStore.cs`](Authentication/ApiKeyStore.cs) — add an entry per
+user before starting the server:
+
+```csharp
+public static readonly IReadOnlyDictionary<string, string> ApiKeysToUsers =
+    new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["<a long random string for alice>"] = "alice",
+        ["<a long random string for bob>"] = "bob",
+    };
+```
+
+Requests are attributed to whichever user's key was presented (available as
+`HttpContext.User.Identity!.Name` inside the app). Since keys live in source, don't
+commit real secrets to a public repo — this is meant for local/personal use.
+
 ```bash
 dotnet run
 ```
 
-The MCP endpoint is served at `http://localhost:5144/mcp`.
+The MCP endpoint is served at `http://localhost:5144/mcp`. Every request must include
+`Authorization: Bearer <that user's key>`, or it gets a `401`.
 
 ## Using it with Claude
 
@@ -35,9 +54,10 @@ The MCP endpoint is served at `http://localhost:5144/mcp`.
    dotnet run
    ```
 
-2. In a separate terminal, register it:
+2. In a separate terminal, register it, passing the key as a header:
    ```bash
-   claude mcp add --transport http tasks http://localhost:5144/mcp
+   claude mcp add --transport http tasks http://localhost:5144/mcp \
+     --header "Authorization: Bearer <your key>"
    ```
 
 3. Verify it's connected:
@@ -60,7 +80,10 @@ Notes:
 
 Desktop expects stdio servers by default, but recent versions support remote/HTTP
 servers via **Settings → Connectors → Add custom connector**, where you'd paste
-`http://localhost:5144/mcp`.
+`http://localhost:5144/mcp`. The custom connector flow only supports OAuth for
+authenticating remote servers, not arbitrary static headers — a bearer API key like
+this one isn't a fit there. Use Claude Code instead for local testing against this
+server.
 
 ## Using it with GitHub Copilot CLI
 
@@ -69,14 +92,15 @@ servers via **Settings → Connectors → Add custom connector**, where you'd pa
    dotnet run
    ```
 
-2. In a separate terminal, register it:
+2. In a separate terminal, register it, passing the key as a header:
    ```bash
-   copilot mcp add --transport http tasks http://localhost:5144/mcp
+   copilot mcp add --transport http tasks http://localhost:5144/mcp \
+     --header "Authorization: Bearer <your key>"
    ```
 
    Or interactively: run `copilot`, then inside the session type `/mcp add` and fill in
-   the form (server type `HTTP`, URL `http://localhost:5144/mcp`, tools `*`), then
-   press `Ctrl+S` to save.
+   the form (server type `HTTP`, URL `http://localhost:5144/mcp`, tools `*`, and an
+   `Authorization: Bearer <your key>` header), then press `Ctrl+S` to save.
 
 3. This writes to `~/.copilot/mcp-config.json`:
    ```json
@@ -85,6 +109,9 @@ servers via **Settings → Connectors → Add custom connector**, where you'd pa
        "tasks": {
          "type": "http",
          "url": "http://localhost:5144/mcp",
+         "headers": {
+           "Authorization": "Bearer <your key>"
+         },
          "tools": ["*"]
        }
      }
@@ -106,20 +133,34 @@ Requires the GitHub Copilot extension (Agent mode uses MCP tools in chat).
    ```
 
 2. Create `.vscode/mcp.json` in the project (or run **"MCP: Add Server"** from the
-   Command Palette and choose **Workspace**):
+   Command Palette and choose **Workspace**). Use an `inputs` prompt instead of a
+   hardcoded key so the secret doesn't end up committed:
    ```json
    {
+     "inputs": [
+       {
+         "type": "promptString",
+         "id": "tasks-api-key",
+         "description": "API key for the tasks MCP server",
+         "password": true
+       }
+     ],
      "servers": {
        "tasks": {
          "type": "http",
-         "url": "http://localhost:5144/mcp"
+         "url": "http://localhost:5144/mcp",
+         "headers": {
+           "Authorization": "Bearer ${input:tasks-api-key}"
+         }
        }
      }
    }
    ```
+   VS Code prompts for the key the first time it connects and caches it for the
+   workspace (stored in VS Code's secret storage, not in the file).
 
    To make it available across all workspaces instead, run **"MCP: Open User
-   Configuration"** and add the same entry there.
+   Configuration"** and add the same entries there.
 
 3. VS Code shows a trust confirmation dialog the first time the server starts. Use
    **"MCP: List Servers"** from the Command Palette to check its status or restart it.
